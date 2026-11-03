@@ -167,7 +167,7 @@ export function blobRing() {
 }
 
 export const LOOM = {
-  peak: 620,
+  peak: 36,
   "great-tree": 24,
   "desert-arch": 12,
   "frozen-tower": 28,
@@ -193,6 +193,34 @@ export const LOOM = {
   watchtower: 16,
 };
 
+export function mountainGeometry() {
+  const b = makeBuf();
+  const rock = [0.45, 0.42, 0.38];
+  const snow = [0.9, 0.93, 0.95];
+  const shade = [0.3, 0.32, 0.34];
+  const peaks = [
+    [0, 0, 0, 0.85, 1],
+    [-0.5, 0, 0.28, 0.55, 0.68],
+    [0.48, 0, -0.22, 0.5, 0.6],
+    [0.12, 0, 0.55, 0.38, 0.42],
+    [-0.18, 0, -0.5, 0.42, 0.46],
+  ];
+  for (let p = 0; p < peaks.length; p++) {
+    const x = peaks[p][0];
+    const z = peaks[p][2];
+    const r = peaks[p][3];
+    const h = peaks[p][4];
+    cone(b, x, 0, z, r * 1.45, h * 0.42, 9, shade);
+    cone(b, x, 0, z, r, h, 11, p === 0 ? snow : rock);
+    cone(b, x, h * 0.55, z, r * 0.45, h * 0.5, 8, snow);
+  }
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    box(b, Math.cos(a) * 0.72, 0.08, Math.sin(a) * 0.72, 0.28, 0.22 + (i % 3) * 0.08, 0.26, i % 2 ? shade : rock);
+  }
+  return finalize(b);
+}
+
 export function buildLandmark(type) {
   const b = makeBuf();
   const trunk = palette("trunk");
@@ -206,9 +234,7 @@ export function buildLandmark(type) {
   const moss = palette("swamp");
   switch (type) {
     case "peak":
-      cyl(b, 0, 0, 0, 1.4, 0.6, 6, rock);
-      box(b, 0, 1.3, 0, 0.7, 1.4, 0.7, snow);
-      break;
+      return mountainGeometry();
     case "great-tree":
       cyl(b, 0, 0, 0, 1.5, 7, 7, trunk);
       cone(b, 0, 5.5, 0, 6.5, 9, 8, leaf);
@@ -336,13 +362,16 @@ export function buildCaveMouth() {
 
 export function buildCaveInterior() {
   const b = makeBuf();
-  const rock = [0.45, 0.4, 0.36];
-  const dark = [0.32, 0.29, 0.26];
-  box(b, 10, -0.2, 0, 22, 0.4, 6.2, dark);
+  const rock = [0.62, 0.48, 0.36];
+  const dark = [0.42, 0.32, 0.24];
+  const warm = [0.78, 0.58, 0.36];
+  const floor = [0.5, 0.4, 0.3];
+  box(b, 10, -0.2, 0, 22, 0.4, 6.2, floor);
   box(b, 10, 1.7, 2.9, 22, 3.6, 0.45, rock);
-  box(b, 10, 1.7, -2.9, 22, 3.6, 0.45, rock);
+  box(b, 10, 1.7, -2.9, 22, 3.6, 0.45, dark);
   box(b, 20.2, 1.7, 0, 0.45, 3.6, 6.2, rock);
   box(b, 10, 3.5, 0, 22, 0.35, 6.2, dark);
-  cyl(b, 16.5, 0, 0.2, 0.72, 0.85, 6, rock);
+  cyl(b, 16.5, 0, 0.2, 0.72, 0.85, 6, warm);
+  box(b, 16.5, 1.05, 0.2, 0.35, 0.12, 0.35, warm);
   return finalize(b);
 }

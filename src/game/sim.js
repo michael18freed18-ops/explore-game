@@ -144,6 +144,8 @@ export function stepSim(p, a, dt, world) {
         p.x = o.x + 2.2;
         p.z = o.z;
         p.y = 0;
+        p.yaw = -Math.PI / 2;
+        p.pitch = 0.08;
         p.air = false;
         p.vy = 0;
         p.speed = 0;

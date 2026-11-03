@@ -1,8 +1,11 @@
 // @ts-nocheck
 import * as THREE from "three";
 import { createAudio } from "./audio.js";
+import { loadPropLibrary } from "./assets.js";
 import { biomeLabel, createHud } from "./hud.js";
 import { createInput } from "./input.js";
+import { createMouse } from "./mouse.js";
+import { createHints, hintOffset } from "./nudge.js";
 import { loadSave, writeSave } from "./save.js";
 import { createSim, stepSim } from "./sim.js";
 import { caveOrigin, getWorld } from "./world/catalog.js";
@@ -16,7 +19,7 @@ import {
   chestGeometry,
   finalize,
   makeBuf,
-  playerGeometry,
+  mountainGeometry,
   relicGeometry,
   rockGeometry,
   treeGeometry,
@@ -28,9 +31,9 @@ import { findPath } from "./world/nav.js";
 import { CHUNK, HALF, WATER, sampleInto } from "./world/sample.js";
 
 const PRESETS = {
-  low: { radius: 2, seg: 8, fog: 155, near: 55, pixel: 0.8 },
+  low: { radius: 2, seg: 7, fog: 110, near: 36, pixel: 0.34 },
   medium: { radius: 3, seg: 10, fog: 220, near: 85, pixel: 0.92 },
-  high: { radius: 4, seg: 14, fog: 390, near: 130, pixel: 1 },
+  high: { radius: 3, seg: 10, fog: 240, near: 80, pixel: 0.85 },
 };
 
 const tmp = { y: 0, biome: "meadow", moisture: 0, temp: 0 };
@@ -126,7 +129,7 @@ export function startGame(root) {
     renderer.shadowMap.enabled = false;
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(58, 1, 0.12, 900);
+    const camera = new THREE.PerspectiveCamera(48, 1, 0.08, 900);
     const outdoor = new THREE.Group();
     const interior = new THREE.Group();
     scene.add(outdoor, interior);
@@ -157,14 +160,16 @@ export function startGame(root) {
     const sim = createSim(world.spawn);
     sim.yaw = Math.atan2(world.spawn.x, world.spawn.z);
 
-    const player = new THREE.Mesh(geoOf(playerGeometry()), lambert);
-    player.scale.setScalar(1.25);
+    const mouse = createMouse();
+    const player = mouse.rig;
+    scene.add(player);
     const blobTex = blobTexture();
     const blob = new THREE.Mesh(
       new THREE.PlaneGeometry(1.5, 1.5),
       new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false, color: 0x000000 }),
     );
     blob.rotation.x = -Math.PI / 2;
+    blob.scale.setScalar(0.55);
     scene.add(blob);
 
     const trees = makeInstances(geoOf(treeGeometry()), 700);
@@ -186,13 +191,19 @@ export function startGame(root) {
     outdoor.add(chestInst);
 
     const landmarkMeshes = world.landmarks.map((lm) => {
-      const mesh = new THREE.Mesh(geoOf(buildLandmark(lm.type)), lambert);
+      const data = lm.type === "peak" ? mountainGeometry() : buildLandmark(lm.type);
+      const mesh = new THREE.Mesh(geoOf(data), lambert);
       mesh.position.set(lm.x, lm.y, lm.z);
       mesh.rotation.y = lm.yaw;
+      if (lm.type === "peak") mesh.scale.setScalar(48);
       mesh.visible = false;
       outdoor.add(mesh);
       return mesh;
     });
+    const peakFar = new THREE.Mesh(geoOf(mountainGeometry()), lambert);
+    peakFar.frustumCulled = false;
+    peakFar.visible = false;
+    scene.add(peakFar);
 
     const impostor = new THREE.InstancedMesh(
       geoOf(impostorGeo()),
@@ -211,7 +222,7 @@ export function startGame(root) {
       return mesh;
     });
 
-    const caveMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    const caveMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
     const caveMesh = new THREE.Mesh(geoOf(buildCaveInterior()), caveMat);
     caveMesh.frustumCulled = false;
     interior.add(caveMesh);
@@ -221,19 +232,22 @@ export function startGame(root) {
     interior.add(relic);
 
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.82, 1, 40),
+      new THREE.CircleGeometry(1, 48),
       new THREE.MeshBasicMaterial({
-        color: 0xe0a15a,
+        map: softDisc(),
         transparent: true,
-        opacity: 0.42,
-        side: THREE.DoubleSide,
         depthWrite: false,
+        side: THREE.DoubleSide,
       }),
     );
     ring.rotation.x = -Math.PI / 2;
     ring.visible = false;
     scene.add(ring);
 
+    const hints = createHints(scene);
+    let approachT = 0;
+    let library = null;
+    let lastTris = 0;
     const built = new Map();
     const wanted = new Set();
     let queue = [];
@@ -317,6 +331,13 @@ export function startGame(root) {
       }
       writePlain(chestInst, chests);
       for (let v = 0; v < 3; v++) writePlain(trinketInst[v], trinkets[v]);
+      if (library) {
+        trees.visible = false;
+        cacti.visible = false;
+        rocks.visible = false;
+        tufts.visible = false;
+        library.sync(built, sim, preset().fog, !!(window.__stillmereBreak && window.__stillmereBreak.noInstance));
+      }
     }
 
     function writePlain(mesh, list) {
@@ -458,30 +479,42 @@ export function startGame(root) {
 
     function updateCamera(dt) {
       if (!playing) sim.yaw += dt * 0.12;
-      const dist = sim.cave >= 0 ? 4.4 : 7.6;
+      const inCave = sim.cave >= 0;
+      const dist = inCave ? 1.7 : 1.95;
       const lx = -Math.sin(sim.yaw) * Math.cos(sim.pitch);
       const ly = Math.sin(sim.pitch);
       const lz = -Math.cos(sim.yaw) * Math.cos(sim.pitch);
-      const ty = sim.y + 1.35;
-      camera.position.set(sim.x - lx * dist, ty - ly * dist + 0.85, sim.z - lz * dist);
-      if (sim.cave < 0) {
-        const gy = sampleInto(camera.position.x, camera.position.z, tmp).y + 0.45;
+      const ty = sim.y + (inCave ? 0.32 : 0.26);
+      camera.position.set(sim.x - lx * dist, ty - ly * dist + 0.42, sim.z - lz * dist);
+      if (!inCave) {
+        const gy = sampleInto(camera.position.x, camera.position.z, tmp).y + 0.2;
         if (camera.position.y < gy) camera.position.y = gy;
+      } else {
+        const o = caveOrigin(sim.cave);
+        const lxCam = camera.position.x - o.x;
+        const lzCam = camera.position.z - o.z;
+        camera.position.x = o.x + Math.min(18.2, Math.max(1.2, lxCam));
+        camera.position.z = o.z + Math.min(2.15, Math.max(-2.15, lzCam));
+        camera.position.y = Math.min(2.3, Math.max(0.35, camera.position.y));
       }
       sky.position.copy(camera.position);
       camera.lookAt(sim.x, ty, sim.z);
-      camera.far = sim.cave >= 0 ? 60 : 900;
+      camera.far = inCave ? 40 : 900;
       camera.updateProjectionMatrix();
     }
 
-    function updatePlayer() {
-      const bob = playing && sim.speed > 0.4 ? Math.sin(performance.now() * 0.012) * 0.04 : 0;
-      player.position.set(sim.x, sim.y + bob, sim.z);
-      _v.set(sim.x - Math.sin(sim.yaw), sim.y, sim.z - Math.cos(sim.yaw));
-      player.lookAt(_v);
-      blob.position.set(sim.x, sim.y + 0.08, sim.z);
-      blob.visible = sim.cave < 0;
-      player.visible = true;
+    function updatePlayer(dt) {
+      mouse.update(sim, dt);
+      blob.position.set(sim.x, sim.y + 0.03, sim.z);
+      blob.visible = sim.cave < 0 && player.visible;
+      if (sim.cave >= 0) {
+        player.rotation.set(0, Math.PI / 2, 0);
+        player.position.set(sim.x, sim.y, sim.z);
+      } else {
+        player.position.set(sim.x, sim.y, sim.z);
+        _v.set(sim.x - Math.sin(sim.yaw), sim.y + 0.2, sim.z - Math.cos(sim.yaw));
+        player.lookAt(_v);
+      }
     }
 
     function pointOf(t) {
@@ -518,10 +551,11 @@ export function startGame(root) {
         return;
       }
       const pt = pointOf(active);
+      const off = hintOffset(active.id);
       const dist = Math.hypot(sim.x - pt.x, sim.z - pt.z);
-      const radius = Math.max(3.5, dist * 0.86);
+      const radius = Math.max(15, dist * 0.86);
       ring.visible = sim.cave < 0 || active.caveId === sim.cave;
-      ring.position.set(pt.x, pt.y + 0.35, pt.z);
+      ring.position.set(pt.x + off.x, pt.y + 0.35, pt.z + off.z);
       ring.scale.setScalar(radius);
       const interval = Math.max(0.16, Math.min(1.35, dist / 170));
       if (playing && now > chimeT) {
@@ -586,7 +620,7 @@ export function startGame(root) {
         const near = dist < fog * 0.82;
         landmarkMeshes[i].visible = near && sim.cave < 0;
         const shell = fog * 0.93;
-        if (sim.cave >= 0 || dist < fog * 0.72) {
+        if (sim.cave >= 0 || dist < fog * 0.72 || lm.type === "peak") {
           _s.set(0, 0, 0);
           _v.set(0, -999, 0);
         } else {
@@ -602,6 +636,22 @@ export function startGame(root) {
       }
       impostor.instanceMatrix.needsUpdate = true;
       impostor.visible = sim.cave < 0;
+      const peak = world.landmarks.findIndex((lm) => lm.type === "peak");
+      if (peak >= 0 && sim.cave < 0) {
+        const lm = world.landmarks[peak];
+        const dx = lm.x - sim.x;
+        const dz = lm.z - sim.z;
+        const dist = Math.hypot(dx, dz) || 1;
+        const near = dist < fog * 0.82;
+        landmarkMeshes[peak].visible = near;
+        if (!near) {
+          const k = (fog * 0.93) / dist;
+          peakFar.visible = true;
+          peakFar.position.set(sim.x + dx * k, Math.max(lm.y * k, 8), sim.z + dz * k);
+          const s = Math.max(6, 48 * k);
+          peakFar.scale.setScalar(s);
+        } else peakFar.visible = false;
+      } else peakFar.visible = false;
       for (let i = 0; i < mouths.length; i++) {
         const c = world.caves[i];
         mouths[i].visible = sim.cave < 0 && Math.hypot(c.x - sim.x, c.z - sim.z) < fog;
@@ -611,8 +661,10 @@ export function startGame(root) {
         const o = caveOrigin(sim.cave);
         interior.position.set(o.x, 0, o.z);
         interior.visible = true;
-        caveLight.intensity = 2.2;
-        caveLight.position.set(16.5, 2.2, 0.2);
+        caveLight.intensity = 8;
+        caveLight.distance = 22;
+        caveLight.color.setHex(0xffc48a);
+        caveLight.position.set(16.5, 2.1, 0.2);
         const relicT = world.treasures.find((t) => t.kind === "relic" && t.caveId === sim.cave);
         relic.visible = !!relicT && !found.has(relicT.id);
         water.visible = false;
@@ -713,7 +765,21 @@ export function startGame(root) {
         steps++;
       }
       updateCamera(dt);
-      updatePlayer();
+      updatePlayer(dt);
+      hints.update(sim, world.treasures, found, performance.now() / 1000);
+      if (sim.cave < 0 && playing) {
+        let nearD = Infinity;
+        for (let i = 0; i < world.treasures.length; i++) {
+          const t = world.treasures[i];
+          if (found.has(t.id) || t.kind === "relic") continue;
+          const d = Math.hypot(sim.x - t.x, sim.z - t.z);
+          if (d < nearD) nearD = d;
+        }
+        if (nearD <= 60 && senseId == null && performance.now() / 1000 > approachT) {
+          approachT = performance.now() / 1000 + 0.55 + nearD / 90;
+          audio.approach(nearD);
+        }
+      }
       if (sim.cave < 0) {
         const cx = Math.floor(sim.x / CHUNK);
         const cz = Math.floor(sim.z / CHUNK);
@@ -725,8 +791,16 @@ export function startGame(root) {
       }
       updateDressing();
       const pset = preset();
-      scene.fog.near = sim.cave >= 0 ? 3 : pset.near;
-      scene.fog.far = sim.cave >= 0 ? 28 : pset.fog;
+      const caveWash = !!(window.__stillmereBreak && window.__stillmereBreak.caveFog);
+      if (sim.cave >= 0) {
+        scene.fog.color.setHex(caveWash ? 0xb7c4ce : 0x3a2c24);
+        scene.fog.near = caveWash ? 0.05 : 10;
+        scene.fog.far = caveWash ? 0.4 : 46;
+        renderer.setClearColor(caveWash ? 0xb7c4ce : 0x241910, 1);
+      } else {
+        scene.fog.near = pset.near;
+        scene.fog.far = pset.fog;
+      }
       sampleInto(sim.x, sim.z, tmp);
       const place =
         sim.cave >= 0 ? `Cave ${sim.cave + 1} · ${biomeLabel(world.caves[sim.cave].biome)}` : biomeLabel(tmp.biome);
@@ -739,9 +813,11 @@ export function startGame(root) {
         fpsLabel: `${Math.round(fpsEma)} fps`,
         senseCd,
         dt,
+        hazes: hints.hazes(),
       });
       renderer.render(scene, camera);
       lastCalls = renderer.info.render.calls;
+      lastTris = renderer.info.render.triangles;
       track(dt);
     }
 
@@ -750,6 +826,15 @@ export function startGame(root) {
     updateCounts();
     hud.paintBase();
     reconcile();
+    loadPropLibrary()
+      .then((lib) => {
+        if (bag.dead || !lib) return;
+        library = lib;
+        lib.attach(outdoor);
+        refreshProps();
+        if (window.__wander) window.__wander.assets = true;
+      })
+      .catch((err) => console.error(err));
 
     function onVis() {
       if (document.hidden) renderer.setAnimationLoop(null);
@@ -810,6 +895,8 @@ export function startGame(root) {
         sim.x = o.x + 8;
         sim.z = o.z;
         sim.y = 0;
+        sim.yaw = -Math.PI / 2;
+        sim.pitch = 0.08;
       },
       setPath(points) {
         path = points;
@@ -849,6 +936,29 @@ export function startGame(root) {
       setHudSabotage(on) {
         root.classList.toggle("is-sabotage", !!on);
       },
+      setPose(name) {
+        window.__stillmereBreak = { ...(window.__stillmereBreak || {}), pose: name || null };
+      },
+      nudge() {
+        return { ...hints.state };
+      },
+      pingSense() {
+        const n = nearest();
+        if (!n.t) return null;
+        senseId = n.t.id;
+        senseCd = 10;
+        const off = hintOffset(n.t.id);
+        const dist = Math.hypot(sim.x - n.pt.x, sim.z - n.pt.z);
+        return {
+          id: n.t.id,
+          dist,
+          offset: Math.hypot(off.x, off.z),
+          radius: Math.max(15, dist * 0.86),
+        };
+      },
+      anim() {
+        return mouse.sample();
+      },
       stats() {
         return {
           x: sim.x,
@@ -862,6 +972,7 @@ export function startGame(root) {
           minFps: fpsN > 90 ? minFps : fpsEma,
           avgFps: fpsN ? fpsSum / fpsN : fpsEma,
           draws: lastCalls,
+          tris: lastTris,
           heap: performance.memory?.usedJSHeapSize || 0,
           found: found.size,
           tier,
@@ -911,6 +1022,23 @@ function paintSky(geo, u) {
     arr[i * 3 + 2] = (0.74 * k + day * 0.05) * (1 - t) + 0.72 * k * t;
   }
   colors.needsUpdate = true;
+}
+
+function softDisc() {
+  const c = document.createElement("canvas");
+  c.width = 128;
+  c.height = 128;
+  const g = c.getContext("2d");
+  const grd = g.createRadialGradient(64, 64, 18, 64, 64, 64);
+  grd.addColorStop(0, "rgba(224,161,90,0)");
+  grd.addColorStop(0.62, "rgba(224,161,90,0.08)");
+  grd.addColorStop(0.82, "rgba(224,161,90,0.55)");
+  grd.addColorStop(1, "rgba(224,161,90,0)");
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 function blobTexture() {

@@ -85,9 +85,25 @@ export function createHud(root) {
     baseReady = true;
   }
 
-  function blit(ctx, canvas, sim) {
+  function blit(ctx, canvas, sim, hazes) {
     if (!baseReady) return;
     ctx.drawImage(base, 0, 0, canvas.width, canvas.height);
+    const scale = canvas.width / (HALF * 2);
+    if (hazes) {
+      for (let i = 0; i < hazes.length; i++) {
+        const h = hazes[i];
+        const px = ((h.x + HALF) / (HALF * 2)) * canvas.width;
+        const py = ((HALF - h.z) / (HALF * 2)) * canvas.height;
+        const rad = 75 * scale;
+        const g = ctx.createRadialGradient(px, py, rad * 0.15, px, py, Math.max(1.5, rad));
+        g.addColorStop(0, "rgba(224,161,90,0.32)");
+        g.addColorStop(1, "rgba(224,161,90,0)");
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(px, py, Math.max(1.5, rad), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
     const px = ((sim.x + HALF) / (HALF * 2)) * canvas.width;
     const py = ((HALF - sim.z) / (HALF * 2)) * canvas.height;
     ctx.fillStyle = "#1a2330";
@@ -129,8 +145,8 @@ export function createHud(root) {
         sense.textContent = "Sense";
         sense.disabled = false;
       }
-      blit(mapCtx, mapCanvas, sim);
-      if (!modal.hidden) blit(bigCtx, big, sim);
+      blit(mapCtx, mapCanvas, sim, opts.hazes);
+      if (!modal.hidden) blit(bigCtx, big, sim, opts.hazes);
       if (noteTimer > 0) {
         noteTimer -= opts.dt || 0;
         if (noteTimer <= 0) root.querySelector("#note").textContent = "";

@@ -27,6 +27,10 @@ export function createAudio() {
       const closeness = Math.max(0, Math.min(1, 1 - dist / 280));
       tone(520 + closeness * 280, 0.07, 0.035, "sine");
     },
+    approach(dist) {
+      const closeness = Math.max(0, Math.min(1, 1 - dist / 60));
+      tone(440 + closeness * 220, 0.16, 0.012 + closeness * 0.045, "sine");
+    },
     found(kind) {
       tone(kind === "relic" ? 392 : 523, 0.09, 0.05, "triangle");
       setTimeout(() => tone(kind === "relic" ? 784 : 784, 0.14, 0.04, "sine"), 80);

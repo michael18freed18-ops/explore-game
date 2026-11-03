@@ -53,6 +53,17 @@ export function setWorldForTests(world) {
   cached = world;
 }
 
+let placementMode = "scatter";
+
+export function setPlacementMode(mode) {
+  placementMode = mode === "row" ? "row" : "scatter";
+  cached = null;
+}
+
+export function getPlacementMode() {
+  return placementMode;
+}
+
 function rand(n) {
   let x = Math.imul(n ^ SEED, 0x27bb2ee6);
   x = Math.imul(x ^ (x >>> 15), 0x85ebca6b);
@@ -214,6 +225,7 @@ function placeCaves(nav, reach) {
         const y = nav.h[k];
         if (y < WATER + 1) continue;
         const [x, z] = cellCenter(nav, i, j);
+        if (Math.min(HALF - Math.abs(x), HALF - Math.abs(z)) < 450) continue;
         const ang = Math.atan2(z, x);
         const sec = Math.floor((((ang + Math.PI) / (Math.PI * 2)) * 10) % 10);
         if (sec !== sector) continue;
@@ -311,7 +323,27 @@ function candidatesNear(nav, reach, x, z, minR, maxR) {
   return out;
 }
 
-function placeTreasures(nav, reach, landmarks, caves) {
+function borderOf(x, z) {
+  return Math.min(HALF - Math.abs(x), HALF - Math.abs(z));
+}
+
+function placeOutdoor(outdoor, spot, kind, variant, landmarkId) {
+  const s = sample(spot.x, spot.z);
+  outdoor.push({
+    kind,
+    variant,
+    x: spot.x,
+    z: spot.z,
+    y: s.y + (kind === "chest" ? 0.55 : 0.7),
+    biome: s.biome,
+    landmarkId,
+    caveId: null,
+    mapX: spot.x,
+    mapZ: spot.z,
+  });
+}
+
+function placeTreasuresRow(nav, reach, landmarks, caves) {
   const outdoor = [];
   for (let li = 0; li < landmarks.length; li++) {
     const lm = landmarks[li];
@@ -327,19 +359,7 @@ function placeTreasures(nav, reach, landmarks, caves) {
       const kind = chests < 20 && got === 0 ? "chest" : "trinket";
       const trinkets = outdoor.filter((t) => t.kind === "trinket").length;
       if (kind === "trinket" && trinkets >= 120) continue;
-      const s = sample(spot.x, spot.z);
-      outdoor.push({
-        kind,
-        variant: (li + got) % 3,
-        x: spot.x,
-        z: spot.z,
-        y: s.y + (kind === "chest" ? 0.55 : 0.7),
-        biome: s.biome,
-        landmarkId: lm.id,
-        caveId: null,
-        mapX: spot.x,
-        mapZ: spot.z,
-      });
+      placeOutdoor(outdoor, spot, kind, (li + got) % 3, lm.id);
       got++;
     }
     lm.nearby = got;
@@ -380,26 +400,98 @@ function placeTreasures(nav, reach, landmarks, caves) {
         }
       }
       if (byLandmark) continue;
-      const s = sample(x, z);
-      outdoor.push({
-        kind,
-        variant: n % 3,
-        x,
-        z,
-        y: s.y + (kind === "chest" ? 0.55 : 0.7),
-        biome: s.biome,
-        landmarkId: null,
-        caveId: null,
-        mapX: x,
-        mapZ: z,
-      });
+      placeOutdoor(outdoor, { x, z }, kind, n % 3, null);
     }
   }
 
   tryFill("trinket", true);
   tryFill("trinket", false);
   tryFill("chest", false);
+  return finishTreasures(outdoor, caves);
+}
 
+function placeTreasuresScatter(nav, reach, landmarks, caves) {
+  const outdoor = [];
+  const bins = new Map();
+  const binKey = (x, z) => `${Math.floor((x + HALF) / 500)}:${Math.floor((z + HALF) / 500)}`;
+  const binCount = (x, z) => bins.get(binKey(x, z)) || 0;
+  const addBin = (x, z) => bins.set(binKey(x, z), binCount(x, z) + 1);
+
+  for (let li = 0; li < landmarks.length; li++) {
+    const lm = landmarks[li];
+    const n = 1 + Math.floor(rand(li * 19 + 4) * 3);
+    let pool = candidatesNear(nav, reach, lm.x, lm.z, 42, 180);
+    if (pool.length < n) pool = candidatesNear(nav, reach, lm.x, lm.z, 36, 280);
+    const inward = pool.filter((spot) => borderOf(spot.x, spot.z) >= 400 && binCount(spot.x, spot.z) < 8);
+    const usable = inward.length ? inward : pool.filter((spot) => binCount(spot.x, spot.z) < 8);
+    usable.sort((a, b) => b.hide - a.hide || a.i - b.i || a.j - b.j);
+    let got = 0;
+    for (let c = 0; c < usable.length && got < n; c++) {
+      const spot = usable[c];
+      if (tooClose(outdoor, spot.x, spot.z, 40)) continue;
+      if (binCount(spot.x, spot.z) >= 8) continue;
+      const chests = outdoor.filter((t) => t.kind === "chest").length;
+      const kind = chests < 20 && got === 0 ? "chest" : "trinket";
+      const trinkets = outdoor.filter((t) => t.kind === "trinket").length;
+      if (kind === "trinket" && trinkets >= 120) continue;
+      placeOutdoor(outdoor, spot, kind, (li + got) % 3, lm.id);
+      addBin(spot.x, spot.z);
+      got++;
+    }
+    lm.nearby = got;
+  }
+
+  const cells = [];
+  const total = nav.cols * nav.rows;
+  for (let k = 0; k < total; k++) {
+    if (!reach[k]) continue;
+    const j = Math.floor(k / nav.cols);
+    const i = k - j * nav.cols;
+    if (nav.h[k] < WATER + 0.4) continue;
+    const [x, z] = cellCenter(nav, i, j);
+    if (borderOf(x, z) < 400) continue;
+    if (Math.hypot(x, z) < 80) continue;
+    let byLandmark = false;
+    for (let li = 0; li < landmarks.length; li++) {
+      if (Math.hypot(landmarks[li].x - x, landmarks[li].z - z) < 200) {
+        byLandmark = true;
+        break;
+      }
+    }
+    if (byLandmark) continue;
+    cells.push(k);
+  }
+  for (let i = cells.length - 1; i > 0; i--) {
+    const j = Math.floor(rand(i * 9176 + 13) * (i + 1));
+    const swap = cells[i];
+    cells[i] = cells[j];
+    cells[j] = swap;
+  }
+
+  function tryFill(kind, minDist) {
+    for (let n = 0; n < cells.length; n++) {
+      const have = outdoor.filter((t) => t.kind === kind).length;
+      const cap = kind === "chest" ? 20 : 120;
+      if (have >= cap) return;
+      const k = cells[n];
+      const j = Math.floor(k / nav.cols);
+      const i = k - j * nav.cols;
+      const [x, z] = cellCenter(nav, i, j);
+      if (tooClose(outdoor, x, z, minDist)) continue;
+      if (binCount(x, z) >= 8) continue;
+      placeOutdoor(outdoor, { x, z }, kind, n % 3, null);
+      addBin(x, z);
+    }
+  }
+
+  tryFill("trinket", 55);
+  if (outdoor.filter((t) => t.kind === "trinket").length < 120) tryFill("trinket", 40);
+  tryFill("chest", 55);
+  if (outdoor.filter((t) => t.kind === "chest").length < 20) tryFill("chest", 40);
+  return finishTreasures(outdoor, caves);
+}
+
+function finishTreasures(outdoor, caves) {
   const relics = caves.map((cave) => {
     const o = caveOrigin(cave.id);
     return {
@@ -415,11 +507,15 @@ function placeTreasures(nav, reach, landmarks, caves) {
       mapZ: cave.z,
     };
   });
-
   const trinkets = outdoor.filter((t) => t.kind === "trinket").slice(0, 120);
   const chests = outdoor.filter((t) => t.kind === "chest").slice(0, 20);
-  const treasures = [...trinkets, ...chests, ...relics].map((t, id) => ({ ...t, id }));
-  return treasures;
+  return [...trinkets, ...chests, ...relics].map((t, id) => ({ ...t, id }));
+}
+
+function placeTreasures(nav, reach, landmarks, caves) {
+  return placementMode === "row"
+    ? placeTreasuresRow(nav, reach, landmarks, caves)
+    : placeTreasuresScatter(nav, reach, landmarks, caves);
 }
 
 export function generateWorld() {
@@ -445,6 +541,27 @@ export function generateWorld() {
     caves,
     treasures,
     ms: Date.now() - t0,
+  };
+}
+
+export function spreadReport(world) {
+  const bins = new Map();
+  let edge = 0;
+  for (const t of world.treasures) {
+    const x = t.kind === "relic" ? t.mapX : t.x;
+    const z = t.kind === "relic" ? t.mapZ : t.z;
+    if (borderOf(x, z) < 400) edge++;
+    const key = `${Math.floor((x + HALF) / 500)}:${Math.floor((z + HALF) / 500)}`;
+    bins.set(key, (bins.get(key) || 0) + 1);
+  }
+  let worst = 0;
+  for (const n of bins.values()) worst = Math.max(worst, n);
+  const edgePct = edge / Math.max(1, world.treasures.length);
+  return {
+    edge,
+    edgePct,
+    worst,
+    ok: edgePct <= 0.05 && worst <= 8,
   };
 }
 
