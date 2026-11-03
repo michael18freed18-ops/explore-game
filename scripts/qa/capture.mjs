@@ -130,7 +130,7 @@ async function poseSpan(flags) {
 }
 
 const animGood = await poseSpan(null);
-const animPlain = await poseSpan({ plainClone: true });
+const animFrozen = await poseSpan({ freezeAnim: true });
 
 const hidden = await browser.newPage({ viewport: { width: 800, height: 600 } });
 await boot(hidden, { breakFlags: { hideMouse: true, caveFog: true } });
@@ -168,7 +168,7 @@ console.log(
       caveReport,
       layoutReport,
       animGood,
-      animPlain,
+      animFrozen,
       zeroNudge,
       zeroSense,
       looseStats: { draws: looseStats.draws, tris: looseStats.tris },

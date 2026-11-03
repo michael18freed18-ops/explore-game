@@ -11,6 +11,8 @@ const _q = new THREE.Quaternion();
 const _v = new THREE.Vector3();
 const _s = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
+const _dir = new THREE.Vector3();
+const _ctr = new THREE.Vector3();
 
 function lambertFrom(src, geo) {
   const color = src && src.color ? src.color.clone() : new THREE.Color(0xffffff);
@@ -65,18 +67,21 @@ function partsOf(gltf) {
   return kept.length ? kept : parts;
 }
 
-function fit(geo, height) {
-  geo.computeBoundingBox();
-  const box = geo.boundingBox;
+function standUp(parts) {
+  const box = new THREE.Box3();
+  for (const part of parts) {
+    part.geo.computeBoundingBox();
+    box.union(part.geo.boundingBox);
+  }
   const size = new THREE.Vector3();
   box.getSize(size);
-  const h = Math.max(0.001, size.y);
-  const s = height / h;
-  const cx = (box.min.x + box.max.x) / 2;
-  const cz = (box.min.z + box.max.z) / 2;
-  geo.translate(-cx, -box.min.y, -cz);
-  geo.scale(s, s, s);
-  return geo;
+  // Only tip meshes that are clearly lying along one axis. A wide canopy is
+  // taller than it is "flat", so it must stay upright or it becomes a green wall.
+  const rot = new THREE.Matrix4();
+  if (size.z > size.y * 1.6 && size.z > size.x * 1.3) rot.makeRotationX(-Math.PI / 2);
+  else if (size.x > size.y * 1.6 && size.x > size.z * 1.3) rot.makeRotationZ(Math.PI / 2);
+  else return;
+  for (const part of parts) part.geo.applyMatrix4(rot);
 }
 
 async function loadParts(loader, url, height) {
@@ -91,7 +96,7 @@ async function loadParts(loader, url, height) {
     raw.push({ geo: g, mat });
   });
   if (!raw.length) throw new Error("empty " + url);
-  // One merged-bounds fit, then split stays in the same space.
+  standUp(raw);
   const union = new THREE.Box3();
   for (const part of raw) {
     part.geo.computeBoundingBox();
@@ -105,6 +110,7 @@ async function loadParts(loader, url, height) {
   for (const part of raw) {
     part.geo.translate(-cx, -union.min.y, -cz);
     part.geo.scale(s, s, s);
+    if (!part.geo.getAttribute("normal")) part.geo.computeVertexNormals();
     part.lambert = lambertFrom(part.mat, part.geo);
   }
   return raw;
@@ -176,9 +182,15 @@ export async function loadPropLibrary() {
           choice._n = used + 1;
           const lod = dist > 46 ? "far" : "near";
           const parts = choice[lod];
+          let sc = p[i + 5] || 1;
+          if (role === "tree") {
+            const wobble = 0.9 + ((Math.abs(Math.imul(Math.floor(x), 17) ^ Math.imul(Math.floor(z), 31)) >>> 0) % 20) / 100;
+            const boost = (typeof window !== "undefined" && window.__stillmereBreak?.treeScale) || 1;
+            sc = wobble * boost;
+          }
           for (let pi = 0; pi < parts.length; pi++) {
             const list = buckets.get(keyOf(choice.id, lod, pi));
-            if (list) list.push([x, y, z, p[i + 4], p[i + 5]]);
+            if (list) list.push([x, y, z, p[i + 4], sc]);
           }
           n++;
         }
@@ -236,8 +248,33 @@ export async function loadPropLibrary() {
       this.tris = tris;
       this.placed = n;
     },
+    maxCover(camera, viewW, viewH) {
+      if (!this.meshes || !camera) return 0;
+      let max = 0;
+      const fov = (camera.fov * Math.PI) / 180;
+      const focal = (viewH * 0.5) / Math.max(0.2, Math.tan(fov * 0.5));
+      const screen = Math.max(1, viewW * viewH);
+      camera.getWorldDirection(_dir);
+      for (const mesh of this.meshes) {
+        if (!mesh.count) continue;
+        if (!mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere();
+        const sphere = mesh.geometry.boundingSphere;
+        for (let i = 0; i < mesh.count; i++) {
+          mesh.getMatrixAt(i, _m);
+          _ctr.copy(sphere.center).applyMatrix4(_m);
+          _v.copy(_ctr).sub(camera.position);
+          const dist = _v.length();
+          if (dist < 0.3 || _v.dot(_dir) <= 0) continue;
+          _m.decompose(_ctr, _q, _s);
+          const sc = Math.max(_s.x, _s.y, _s.z);
+          const px = (sphere.radius * sc * focal) / dist;
+          const frac = Math.min(1, (Math.PI * px * px) / screen);
+          if (frac > max) max = frac;
+        }
+      }
+      return max;
+    },
   };
 }
 
-void fit;
 void partsOf;

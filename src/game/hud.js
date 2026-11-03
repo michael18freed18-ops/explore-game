@@ -36,7 +36,7 @@ export function createHud(root) {
     <div class="sm-modal" id="modal" hidden>
       <div class="sm-modal-card">
         <button type="button" id="map-close">Close map</button>
-        <canvas id="map-big" width="${MAP}" height="${MAP}"></canvas>
+        <canvas id="map-big" width="480" height="480"></canvas>
         <p class="sm-found" id="found-big">Found 0/150</p>
         <ul id="map-counts"></ul>
       </div>
@@ -50,7 +50,45 @@ export function createHud(root) {
   const base = document.createElement("canvas");
   base.width = MAP;
   base.height = MAP;
+  const zoom = document.createElement("canvas");
+  zoom.width = 200;
+  zoom.height = 200;
+  let zoomKey = "";
   let baseReady = false;
+
+  function paintZoom(world, originX, originZ) {
+    const key = `${Math.round(world)}|${Math.round(originX / 24)}|${Math.round(originZ / 24)}`;
+    if (key === zoomKey) return;
+    zoomKey = key;
+    const zctx = zoom.getContext("2d");
+    const img = zctx.createImageData(200, 200);
+    const sample = { y: 0, biome: "meadow", moisture: 0, temp: 0 };
+    const rgb = {
+      meadow: [158, 176, 104],
+      forest: [62, 112, 74],
+      desert: [214, 184, 112],
+      snow: [226, 232, 236],
+      shore: [214, 196, 156],
+      swamp: [86, 104, 74],
+      autumn: [186, 112, 58],
+      lake: [58, 122, 146],
+    };
+    for (let y = 0; y < 200; y++) {
+      const z = originZ - ((y + 0.5) / 200) * world;
+      for (let x = 0; x < 200; x++) {
+        const wx = originX + ((x + 0.5) / 200) * world;
+        sampleInto(wx, z, sample);
+        const ckey = sample.biome === "shore" && sample.y < WATER ? "lake" : sample.biome;
+        const c = rgb[ckey] || rgb.meadow;
+        const i = (y * 200 + x) * 4;
+        img.data[i] = c[0];
+        img.data[i + 1] = c[1];
+        img.data[i + 2] = c[2];
+        img.data[i + 3] = 255;
+      }
+    }
+    zctx.putImageData(img, 0, 0);
+  }
   let noteTimer = 0;
 
   function paintBase() {
@@ -85,27 +123,37 @@ export function createHud(root) {
     baseReady = true;
   }
 
-  function blit(ctx, canvas, sim, hazes) {
+  function blit(ctx, canvas, sim, hazes, span) {
     if (!baseReady) return;
-    ctx.drawImage(base, 0, 0, canvas.width, canvas.height);
-    const scale = canvas.width / (HALF * 2);
+    const world = span || HALF * 2;
+    const originX = span ? sim.x - world / 2 : -HALF;
+    const originZ = span ? sim.z + world / 2 : HALF;
+    if (!span) {
+      ctx.drawImage(base, 0, 0, canvas.width, canvas.height);
+    } else {
+      paintZoom(world, originX, originZ);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(zoom, 0, 0, canvas.width, canvas.height);
+    }
     if (hazes) {
       for (let i = 0; i < hazes.length; i++) {
         const h = hazes[i];
-        const px = ((h.x + HALF) / (HALF * 2)) * canvas.width;
-        const py = ((HALF - h.z) / (HALF * 2)) * canvas.height;
-        const rad = 75 * scale;
-        const g = ctx.createRadialGradient(px, py, rad * 0.15, px, py, Math.max(1.5, rad));
-        g.addColorStop(0, "rgba(224,161,90,0.32)");
+        const px = ((h.x - originX) / world) * canvas.width;
+        const py = ((originZ - h.z) / world) * canvas.height;
+        const rad = 75 * (canvas.width / world);
+        if (px < -rad || py < -rad || px > canvas.width + rad || py > canvas.height + rad) continue;
+        const g = ctx.createRadialGradient(px, py, rad * 0.05, px, py, Math.max(2, rad));
+        g.addColorStop(0, "rgba(224,161,90,0.35)");
+        g.addColorStop(0.45, "rgba(224,161,90,0.18)");
         g.addColorStop(1, "rgba(224,161,90,0)");
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(px, py, Math.max(1.5, rad), 0, Math.PI * 2);
+        ctx.arc(px, py, Math.max(2, rad), 0, Math.PI * 2);
         ctx.fill();
       }
     }
-    const px = ((sim.x + HALF) / (HALF * 2)) * canvas.width;
-    const py = ((HALF - sim.z) / (HALF * 2)) * canvas.height;
+    const px = ((sim.x - originX) / world) * canvas.width;
+    const py = ((originZ - sim.z) / world) * canvas.height;
     ctx.fillStyle = "#1a2330";
     ctx.beginPath();
     ctx.arc(px, py, 3.5, 0, Math.PI * 2);
@@ -146,7 +194,7 @@ export function createHud(root) {
         sense.disabled = false;
       }
       blit(mapCtx, mapCanvas, sim, opts.hazes);
-      if (!modal.hidden) blit(bigCtx, big, sim, opts.hazes);
+      if (!modal.hidden) blit(bigCtx, big, sim, opts.hazes, 1600);
       if (noteTimer > 0) {
         noteTimer -= opts.dt || 0;
         if (noteTimer <= 0) root.querySelector("#note").textContent = "";

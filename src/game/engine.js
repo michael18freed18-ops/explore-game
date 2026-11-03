@@ -247,6 +247,7 @@ export function startGame(root) {
     const hints = createHints(scene);
     let approachT = 0;
     let library = null;
+    let viewOffset = 0;
     let lastTris = 0;
     const built = new Map();
     const wanted = new Set();
@@ -512,7 +513,8 @@ export function startGame(root) {
         player.position.set(sim.x, sim.y, sim.z);
       } else {
         player.position.set(sim.x, sim.y, sim.z);
-        _v.set(sim.x - Math.sin(sim.yaw), sim.y + 0.2, sim.z - Math.cos(sim.yaw));
+        const face = sim.yaw + viewOffset;
+        _v.set(sim.x - Math.sin(face), sim.y + 0.2, sim.z - Math.cos(face));
         player.lookAt(_v);
       }
     }
@@ -938,6 +940,17 @@ export function startGame(root) {
       },
       setPose(name) {
         window.__stillmereBreak = { ...(window.__stillmereBreak || {}), pose: name || null };
+      },
+      setView(offset) {
+        viewOffset = offset || 0;
+      },
+      refresh() {
+        refreshProps();
+      },
+      cover() {
+        if (!library) return 0;
+        const canvas = renderer.domElement;
+        return library.maxCover(camera, canvas.width, canvas.height);
       },
       nudge() {
         return { ...hints.state };

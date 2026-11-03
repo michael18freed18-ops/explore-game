@@ -4,10 +4,11 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
 
 const FUR = [0.55, 0.33, 0.16];
-const BELLY = [0.78, 0.58, 0.4];
-const EAR = [0.9, 0.62, 0.58];
-const NOSE = [0.32, 0.18, 0.14];
+const BELLY = [0.82, 0.64, 0.48];
+const EAR = [0.93, 0.62, 0.64];
+const NOSE = [0.95, 0.45, 0.52];
 const EYE = [0.08, 0.06, 0.05];
+const WHISK = [0.93, 0.9, 0.84];
 
 function paint(geo, color, bone) {
   const n = geo.attributes.position.count;
@@ -34,10 +35,48 @@ function sphere(r, x, y, z, color, bone) {
   return paint(g, color, bone);
 }
 
+function cone(r, length, x, y, z, color, bone) {
+  const g = new THREE.ConeGeometry(r, length, 7);
+  g.rotateX(Math.PI / 2);
+  g.translate(x, y, z);
+  return paint(g, color, bone);
+}
+
 function box(sx, sy, sz, x, y, z, color, bone) {
   const g = new THREE.BoxGeometry(sx, sy, sz);
   g.translate(x, y, z);
   return paint(g, color, bone);
+}
+
+function rodBetween(r0, r1, ax, ay, az, bx, by, bz, color, bone) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const dz = bz - az;
+  const len = Math.hypot(dx, dy, dz) || 0.001;
+  const g = new THREE.CylinderGeometry(r0, r1, len, 6, 1);
+  const q = new THREE.Quaternion().setFromUnitVectors(
+    new THREE.Vector3(0, 1, 0),
+    new THREE.Vector3(dx / len, dy / len, dz / len),
+  );
+  g.applyQuaternion(q);
+  g.translate((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
+  return paint(g, color, bone);
+}
+
+function fitRig(mesh, rootBone, target) {
+  const geo = mesh.geometry;
+  geo.computeBoundingBox();
+  const minY = geo.boundingBox.min.y;
+  const h = geo.boundingBox.max.y - minY;
+  const s = target / Math.max(0.001, h);
+  geo.translate(0, -minY, 0);
+  geo.scale(s, s, s);
+  rootBone.position.y -= minY;
+  const scaleBone = (b) => {
+    b.position.multiplyScalar(s);
+    for (const c of b.children) if (c.isBone) scaleBone(c);
+  };
+  scaleBone(rootBone);
 }
 
 function buildTemplate() {
@@ -45,59 +84,99 @@ function buildTemplate() {
   const root = new THREE.Bone();
   root.name = "root";
   bones.push(root);
-  const body = new THREE.Bone();
-  body.name = "body";
-  body.position.set(0, 0.16, 0);
-  root.add(body);
-  bones.push(body);
-  const head = new THREE.Bone();
-  head.name = "head";
-  head.position.set(0, 0.12, 0.05);
-  body.add(head);
-  bones.push(head);
-  const earL = new THREE.Bone();
-  earL.name = "earL";
-  earL.position.set(-0.06, 0.08, 0);
-  head.add(earL);
-  bones.push(earL);
-  const earR = new THREE.Bone();
-  earR.name = "earR";
-  earR.position.set(0.06, 0.08, 0);
-  head.add(earR);
-  bones.push(earR);
+  const bodyBone = new THREE.Bone();
+  bodyBone.name = "body";
+  bodyBone.position.set(0, 0.12, 0);
+  root.add(bodyBone);
+  bones.push(bodyBone);
+  const headBone = new THREE.Bone();
+  headBone.name = "head";
+  headBone.position.set(0, 0.04, 0.14);
+  bodyBone.add(headBone);
+  bones.push(headBone);
+  const earLBone = new THREE.Bone();
+  earLBone.name = "earL";
+  earLBone.position.set(-0.07, 0.06, -0.01);
+  headBone.add(earLBone);
+  bones.push(earLBone);
+  const earRBone = new THREE.Bone();
+  earRBone.name = "earR";
+  earRBone.position.set(0.07, 0.06, -0.01);
+  headBone.add(earRBone);
+  bones.push(earRBone);
+  // Tail points away from the camera (+Z is the snout, which faces the chase cam).
+  const t0 = new THREE.Vector3(0, 0.11, -0.15);
+  const t1 = new THREE.Vector3(0, 0.15, -0.3);
+  const t2 = new THREE.Vector3(0, 0.24, -0.42);
+  const t3 = new THREE.Vector3(0, 0.34, -0.48);
   const tail = new THREE.Bone();
   tail.name = "tail";
-  tail.position.set(0, -0.02, -0.08);
-  body.add(tail);
+  tail.position.copy(t0).sub(bodyBone.position);
+  bodyBone.add(tail);
   bones.push(tail);
+  const tailMid = new THREE.Bone();
+  tailMid.name = "tailMid";
+  tailMid.position.copy(t1).sub(t0);
+  tail.add(tailMid);
+  bones.push(tailMid);
+  const tailTip = new THREE.Bone();
+  tailTip.name = "tailTip";
+  tailTip.position.copy(t2).sub(t1);
+  tailMid.add(tailTip);
+  bones.push(tailTip);
   const hips = [
-    ["legFL", -0.05, -0.06, 0.05],
-    ["legFR", 0.05, -0.06, 0.05],
-    ["legBL", -0.05, -0.06, -0.05],
-    ["legBR", 0.05, -0.06, -0.05],
+    ["legFL", -0.045, -0.05, 0.06],
+    ["legFR", 0.045, -0.05, 0.06],
+    ["legBL", -0.04, -0.045, -0.07],
+    ["legBR", 0.04, -0.045, -0.07],
   ];
   for (const [name, x, y, z] of hips) {
     const b = new THREE.Bone();
     b.name = name;
     b.position.set(x, y, z);
-    body.add(b);
+    bodyBone.add(b);
     bones.push(b);
   }
 
+  const bodyGeo = new THREE.SphereGeometry(0.08, 10, 8);
+  bodyGeo.scale(0.7, 0.62, 1.7);
+  bodyGeo.translate(0, 0.11, -0.01);
+  const belly = new THREE.SphereGeometry(0.05, 8, 6);
+  belly.scale(0.65, 0.45, 1.15);
+  belly.translate(0, 0.085, 0.02);
+  const headGeo = new THREE.SphereGeometry(0.046, 10, 8);
+  headGeo.scale(0.88, 0.8, 1.05);
+  headGeo.translate(0, 0.16, 0.15);
+  const earGeoL = new THREE.SphereGeometry(0.062, 8, 6);
+  earGeoL.scale(0.22, 1.45, 0.28);
+  earGeoL.translate(-0.078, 0.25, 0.13);
+  const earGeoR = earGeoL.clone();
+  earGeoR.translate(0.156, 0, 0);
+  const whisk = (y, z, side, lift) =>
+    rodBetween(0.0035, 0.0015, side * 0.02, y, z, side * 0.11, y + lift, z + 0.03, WHISK, 2);
   const parts = [
-    sphere(0.09, 0, 0.16, 0, FUR, 1),
-    sphere(0.055, 0, 0.13, 0.02, BELLY, 1),
-    sphere(0.095, 0, 0.28, 0.05, FUR, 2),
-    sphere(0.028, 0, 0.25, 0.13, NOSE, 2),
-    sphere(0.016, -0.04, 0.3, 0.12, EYE, 2),
-    sphere(0.016, 0.04, 0.3, 0.12, EYE, 2),
-    sphere(0.042, -0.06, 0.36, 0.03, EAR, 3),
-    sphere(0.042, 0.06, 0.36, 0.03, EAR, 4),
-    box(0.035, 0.04, 0.09, 0, 0.15, -0.14, FUR, 5),
-    box(0.032, 0.08, 0.032, -0.05, 0.04, 0.05, FUR, 6),
-    box(0.032, 0.08, 0.032, 0.05, 0.04, 0.05, FUR, 7),
-    box(0.032, 0.08, 0.032, -0.05, 0.04, -0.05, FUR, 8),
-    box(0.032, 0.08, 0.032, 0.05, 0.04, -0.05, FUR, 9),
+    paint(bodyGeo, FUR, 1),
+    paint(belly, BELLY, 1),
+    paint(headGeo, FUR, 2),
+    cone(0.026, 0.11, 0, 0.155, 0.22, FUR, 2),
+    sphere(0.014, 0, 0.155, 0.282, NOSE, 2),
+    sphere(0.011, -0.032, 0.175, 0.175, EYE, 2),
+    sphere(0.011, 0.032, 0.175, 0.175, EYE, 2),
+    paint(earGeoL, EAR, 3),
+    paint(earGeoR, EAR, 4),
+    whisk(0.162, 0.24, -1, 0.012),
+    whisk(0.152, 0.25, -1, 0),
+    whisk(0.144, 0.238, -1, -0.012),
+    whisk(0.162, 0.24, 1, 0.012),
+    whisk(0.152, 0.25, 1, 0),
+    whisk(0.144, 0.238, 1, -0.012),
+    rodBetween(0.012, 0.008, t0.x, t0.y, t0.z, t1.x, t1.y, t1.z, FUR, 5),
+    rodBetween(0.008, 0.005, t1.x, t1.y, t1.z, t2.x, t2.y, t2.z, FUR, 6),
+    rodBetween(0.005, 0.0025, t2.x, t2.y, t2.z, t3.x, t3.y, t3.z, FUR, 7),
+    box(0.018, 0.07, 0.018, -0.045, 0.04, 0.07, FUR, 8),
+    box(0.018, 0.07, 0.018, 0.045, 0.04, 0.07, FUR, 9),
+    box(0.018, 0.065, 0.018, -0.04, 0.038, -0.08, FUR, 10),
+    box(0.018, 0.065, 0.018, 0.04, 0.038, -0.08, FUR, 11),
   ];
   const geo = mergeGeometries(parts, false);
   geo.computeVertexNormals();
@@ -105,6 +184,7 @@ function buildTemplate() {
   const mesh = new THREE.SkinnedMesh(geo, mat);
   mesh.name = "mouse";
   mesh.frustumCulled = false;
+  fitRig(mesh, root, 0.4);
   mesh.add(root);
   mesh.bind(new THREE.Skeleton(bones));
   const rig = new THREE.Group();
@@ -122,6 +202,7 @@ function makeClips() {
   const idle = new THREE.AnimationClip("idle", 1.6, [
     new THREE.NumberKeyframeTrack("body.scale[y]", [0, 0.8, 1.6], [1, 1.06, 1]),
     new THREE.NumberKeyframeTrack("body.scale[x]", [0, 0.8, 1.6], [1, 0.97, 1]),
+    new THREE.NumberKeyframeTrack("tail.rotation[y]", [0, 0.8, 1.6], [0.18, -0.18, 0.18]),
   ]);
   const walk = new THREE.AnimationClip("walk", 0.42, [
     rot("legFL", [0, 0.21, 0.42], [0.7, -0.7, 0.7]),
@@ -130,6 +211,7 @@ function makeClips() {
     rot("legBL", [0, 0.21, 0.42], [-0.7, 0.7, -0.7]),
     new THREE.NumberKeyframeTrack("body.rotation[z]", [0, 0.21, 0.42], [0.08, -0.08, 0.08]),
     new THREE.NumberKeyframeTrack("head.rotation[x]", [0, 0.21, 0.42], [0.05, -0.04, 0.05]),
+    new THREE.NumberKeyframeTrack("tail.rotation[y]", [0, 0.21, 0.42], [-0.55, 0.55, -0.55]),
   ]);
   const jump = new THREE.AnimationClip("jump", 0.45, [
     new THREE.NumberKeyframeTrack("body.scale[y]", [0, 0.12, 0.28, 0.45], [0.72, 1.28, 0.84, 1]),
@@ -147,9 +229,8 @@ function makeClips() {
 }
 
 export function createMouse() {
-  const plain = typeof window !== "undefined" && !!window.__stillmereBreak?.plainClone;
   const template = buildTemplate();
-  const rig = plain ? template.clone(true) : cloneSkeleton(template);
+  const rig = cloneSkeleton(template);
   rig.frustumCulled = false;
   rig.traverse((o) => {
     o.frustumCulled = false;
@@ -167,7 +248,7 @@ export function createMouse() {
   const mesh = rig.getObjectByName("mouse");
   // SwiftShader drops the bone float-texture, so the skinning shader flings
   // the mouse off-screen. Bake the skeleton on the CPU into a plain mesh.
-  // A plain Object3D.clone() keeps the source skeleton, so this stays frozen.
+  // __stillmereBreak.freezeAnim skips the mixer, so the pose stays put.
   mesh.isSkinnedMesh = false;
   const skinIndex = mesh.geometry.attributes.skinIndex;
   const basePos = mesh.geometry.attributes.position.clone();
@@ -219,6 +300,7 @@ export function createMouse() {
       else if (sim.climbing) next = "climb";
       else if (sim.speed > 0.35) next = "walk";
       play(next);
+      if (br.freezeAnim) return;
       if (current === "walk") actions.walk.timeScale = Math.max(0.45, (sim.speed || 1.2) / 1.7);
       else if (actions.walk) actions.walk.timeScale = 1;
       mixer.update(Math.max(0.001, dt));
