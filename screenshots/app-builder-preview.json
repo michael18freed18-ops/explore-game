@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Stillmere",
+      "hasCanvas": true,
+      "bodyTextLen": 209,
+      "bodyTextHash": "16dd9b5fd377fb8cde77b59da2032ab5614016e6087d65cb98572c712aa5a2bd",
+      "bodyTextPrefix": "Found 0/150 Meadow Auto · medium Jump Climb Sense NO ENEMIES. JU",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Stillmere",
+      "hasCanvas": true,
+      "bodyTextLen": 209,
+      "bodyTextHash": "430370104646e53044ee1c80ae9a492f33cd54ce80b25e0b81829449b8d0765e",
+      "bodyTextPrefix": "Found 0/150 Meadow Auto · medium Jump Climb Sense NO ENEMIES. JU",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}

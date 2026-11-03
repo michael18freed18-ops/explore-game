@@ -1,0 +1,73 @@
+Build a calm, no-combat 3D open-world exploration game that runs in the
+browser, designed FIRST for a phone (Samsung Galaxy Z Fold 7, Chrome),
+and also playable on desktop.
+Stack: Three.js + Vite, plain JavaScript. No backend.
+
+Start in plan mode: show me the file structure and milestones before
+editing anything.
+
+MOBILE (top priority)
+- Touch controls: left virtual joystick to move, drag right side to look,
+  buttons for jump, climb, and Sense. Keyboard/mouse also work on desktop.
+- Must work on BOTH the folded cover screen (narrow, tall) and the
+  unfolded inner screen (near-square); re-layout instantly on fold/unfold
+  and rotation. Respect safe areas/notches.
+- Fullscreen on first tap; prevent pinch-zoom and pull-to-refresh.
+- Installable as a PWA (manifest + service worker) so it opens like an app.
+- Pause rendering when the tab is hidden, to save battery.
+
+WORLD
+- Fixed 8 km x 8 km map from a fixed seed (same world every load).
+- Stream terrain in chunks around the player: load nearby chunks, unload
+  far ones, build chunk geometry in a Web Worker so movement never
+  stutters.
+- Terrain from 4-octave noise. Biomes by temperature x moisture
+  (temperature drops with height): meadow, forest, desert, snowy
+  mountains, lakes/beach, swamp, autumn woods.
+- 24 landmarks: 1 giant central peak visible from everywhere, plus
+  regional landmarks spread across biomes (e.g. giant tree, desert arch,
+  frozen tower, waterfall, ruined bridge, stone circle). Each landmark
+  has a low-detail far version so it shows above the fog.
+- 10 caves set into cliffs, each leading to a small separate interior.
+- Look: low-poly, flat shading, sky gradient, fog matching the sky,
+  gentle day/night tint. All art generated in code (no external models).
+
+PLAYER
+- Third-person camera; walk, jump, climb with a stamina bar. No combat.
+
+TREASURES
+- 150 total, in three kinds:
+  * 120 small trinkets: beside odd rocks, flower rings, tree hollows.
+  * 20 chests: behind view-blocking hills, on ledges, near landmarks.
+  * 10 relics: one deep in each cave.
+- No two treasures closer than 40 m; every landmark has 1-3 treasures
+  nearby to reward going there.
+- Minimap (corner, tap to enlarge) shows terrain only, plus
+  "Found X/150" and a per-biome count.
+- Sense button: fuzzy circle around the nearest unfound treasure that
+  shrinks as you approach, plus a quickening chime and a short
+  vibration. One target at a time, 10 s cooldown.
+- Save progress in localStorage.
+
+PERFORMANCE (hard requirement)
+- Phone: steady 60 fps target, never below 30. Desktop: 60 fps.
+- Cap pixel ratio at 2; auto-lower resolution scale if fps drops.
+- Shorter view distance on mobile, hidden by fog. Instanced trees/rocks.
+  Only nearby chunks fully detailed; distant ones use low-detail versions.
+- Under 200 draw calls on mobile. No real-time shadows on mobile (fake
+  blob shadows instead).
+- Low/Medium/High quality setting, defaulting to auto.
+- Memory must stay flat over a 10-minute walk (no leaks).
+
+CHECKS YOU MUST RUN AND REPORT
+1. 10-minute scripted walk across 3 biomes in a mobile-emulated browser
+   (CPU throttled 4x): report min/avg fps, draw calls and memory over time.
+2. Screenshots at folded (approx. 904x2316) and unfolded (approx.
+   1968x2184) sizes, portrait and landscape: controls visible, nothing
+   overlapping. Also one screenshot per biome and one per cave.
+3. Print a top-down map image with every treasure and landmark marked,
+   plus a list of each treasure's position and biome.
+4. Test that all 150 treasures are reachable from spawn (no slope too
+   steep to climb with full stamina).
+5. Prove each check works by breaking it on purpose once (e.g. bury a
+   treasure inside a mountain and show check 4 fails), then restore it.
