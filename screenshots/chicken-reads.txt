@@ -1,0 +1,6 @@
+chicken-idle.png: a white chicken, side-on, with a red comb, orange beak and small orange feet.
+chicken-walk-1.png: a chicken walking, one orange leg stepped forward and the other back.
+chicken-walk-2.png: the same chicken, opposite leg forward.
+chicken-jump.png: a chicken in mid-air, both wings stretched out and both legs spread.
+chicken-fold.png: a chicken jumping with wings and legs spread, on a folded phone.
+chicken-unfold.png: a chicken jumping with wings and legs spread, on an unfolded phone.

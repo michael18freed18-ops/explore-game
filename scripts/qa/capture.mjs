@@ -59,12 +59,12 @@ for (const pose of ["idle", "walk", "jump"]) {
   await page.waitForTimeout(450);
   const anim = await page.evaluate(() => window.__wander.anim());
   await page.screenshot({ path: `/workspace/screenshots/mouse-${pose}.png` });
-  poses[pose] = anim;
+  poses[pose] = { state: anim.state, wingsOpen: anim.wingsOpen, legsSpread: anim.legsSpread };
 }
 const poseYs = [];
 for (let i = 0; i < 6; i++) {
   await page.waitForTimeout(120);
-  poseYs.push((await page.evaluate(() => window.__wander.anim())).poseY);
+  poseYs.push((await page.evaluate(() => window.__wander.anim())).bob);
 }
 
 const trinket = world.treasures.find((t) => t.kind === "trinket");
@@ -120,8 +120,8 @@ async function poseSpan(flags) {
   for (let i = 0; i < 8; i++) {
     await p.waitForTimeout(100);
     const a = await p.evaluate(() => window.__wander.anim());
-    ys.push(a.poseY);
-    clips.push(a.clip);
+    ys.push(a.bob);
+    clips.push(a.state);
   }
   await p.close();
   const min = Math.min(...ys);

@@ -4,7 +4,7 @@ import { createAudio } from "./audio.js";
 import { loadPropLibrary } from "./assets.js";
 import { biomeLabel, createHud } from "./hud.js";
 import { createInput } from "./input.js";
-import { createMouse } from "./mouse.js";
+import { createChicken } from "./chicken.js";
 import { createHints, hintOffset } from "./nudge.js";
 import { loadSave, writeSave } from "./save.js";
 import { createSim, stepSim } from "./sim.js";
@@ -160,8 +160,8 @@ export function startGame(root) {
     const sim = createSim(world.spawn);
     sim.yaw = Math.atan2(world.spawn.x, world.spawn.z);
 
-    const mouse = createMouse();
-    const player = mouse.rig;
+    const chicken = createChicken(renderer);
+    const player = chicken.rig;
     scene.add(player);
     const blobTex = blobTexture();
     const blob = new THREE.Mesh(
@@ -505,18 +505,10 @@ export function startGame(root) {
     }
 
     function updatePlayer(dt) {
-      mouse.update(sim, dt);
+      player.position.set(sim.x, sim.y, sim.z);
+      chicken.update(sim, dt, camera);
       blob.position.set(sim.x, sim.y + 0.03, sim.z);
       blob.visible = sim.cave < 0 && player.visible;
-      if (sim.cave >= 0) {
-        player.rotation.set(0, Math.PI / 2, 0);
-        player.position.set(sim.x, sim.y, sim.z);
-      } else {
-        player.position.set(sim.x, sim.y, sim.z);
-        const face = sim.yaw + viewOffset;
-        _v.set(sim.x - Math.sin(face), sim.y + 0.2, sim.z - Math.cos(face));
-        player.lookAt(_v);
-      }
     }
 
     function pointOf(t) {
@@ -939,7 +931,7 @@ export function startGame(root) {
         root.classList.toggle("is-sabotage", !!on);
       },
       setPose(name) {
-        window.__stillmereBreak = { ...(window.__stillmereBreak || {}), pose: name || null };
+        chicken.setPose(name);
       },
       setView(offset) {
         viewOffset = offset || 0;
@@ -970,7 +962,10 @@ export function startGame(root) {
         };
       },
       anim() {
-        return mouse.sample();
+        return chicken.sample();
+      },
+      seek(phase) {
+        chicken.seek(phase);
       },
       stats() {
         return {
